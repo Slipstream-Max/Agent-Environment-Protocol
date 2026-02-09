@@ -9,7 +9,6 @@ SkillExecutor: 在技能专属的虚拟环境中执行脚本
 注意: MCP 服务器通过 config.add_mcp_server() 自动转换为 tools
 """
 
-import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -77,10 +76,14 @@ class ToolExecutor:
 
     def ensure_venv(self) -> Path:
         """确保虚拟环境存在，返回 Python 路径"""
+        logger.debug(f"检查 tools venv: {self.venv_dir}")
         if not self.venv_dir.exists():
+            logger.error(f"tools venv 不存在: {self.venv_dir}")
             raise RuntimeError("tools venv 不存在，请在配置阶段创建 (.venv)")
 
-        return _get_python(self.venv_dir)
+        python = _get_python(self.venv_dir)
+        logger.debug(f"使用 Python: {python}")
+        return python
 
     def run(
         self,
@@ -105,6 +108,9 @@ class ToolExecutor:
         Returns:
             ExecResult
         """
+        logger.info(f"ToolExecutor.run: cwd={cwd}, workspace={workspace}")
+        logger.debug(f"执行代码:\n{code[:200]}{'...' if len(code) > 200 else ''}")
+
         python = self.ensure_venv()
 
         # 构建执行脚本
@@ -118,14 +124,21 @@ class ToolExecutor:
                 text=True,
                 timeout=60,
             )
+            logger.debug(f"执行完成: return_code={result.returncode}")
+            if result.returncode != 0:
+                logger.warning(
+                    f"执行返回非零: stderr={result.stderr[:200] if result.stderr else ''}"
+                )
             return ExecResult(
                 stdout=result.stdout,
                 stderr=result.stderr,
                 return_code=result.returncode,
             )
         except subprocess.TimeoutExpired:
+            logger.error("工具执行超时 (60s)")
             return ExecResult(stderr="执行超时 (60s)", return_code=124)
         except Exception as e:
+            logger.exception(f"工具执行异常: {e}")
             return ExecResult(stderr=f"执行错误: {e}", return_code=1)
 
     def _build_wrapper_script(
@@ -147,6 +160,7 @@ import sys
 import os
 import json
 import re
+import ast
 import importlib.util
 from pathlib import Path
 
@@ -171,17 +185,45 @@ for py_file in tools_dir.glob("*.py"):
     except Exception as e:
         print(f"Warning: Failed to load tool {{tool_name}}: {{e}}", file=sys.stderr)
 
-# 执行用户代码
+# REPL 风格执行：自动打印最后一个表达式的值
 _code = """{escaped_code}"""
-try:
-    # 尝试 eval (表达式)
+
+def _repl_exec(_code, _globals):
+    """
+    REPL 风格执行代码
+    
+    如果最后一条语句是表达式，自动打印其值
+    """
     try:
-        _result = eval(_code)
-        if _result is not None:
-            print(_result)
-    except SyntaxError:
-        # 尝试 exec (语句)
-        exec(_code)
+        tree = ast.parse(_code)
+    except SyntaxError as e:
+        print(f"SyntaxError: {{e}}", file=sys.stderr)
+        sys.exit(1)
+    
+    if not tree.body:
+        return
+    
+    # 检查最后一条语句是否是表达式
+    last_stmt = tree.body[-1]
+    
+    if isinstance(last_stmt, ast.Expr):
+        # 最后是表达式，分离出来单独 eval
+        # 编译并执行前面的语句
+        if len(tree.body) > 1:
+            mod = ast.Module(body=tree.body[:-1], type_ignores=[])
+            exec(compile(mod, "<code>", "exec"), _globals)
+        
+        # eval 最后一个表达式并打印结果
+        expr = ast.Expression(body=last_stmt.value)
+        result = eval(compile(expr, "<code>", "eval"), _globals)
+        if result is not None:
+            print(result)
+    else:
+        # 最后不是表达式，整体 exec
+        exec(compile(tree, "<code>", "exec"), _globals)
+
+try:
+    _repl_exec(_code, globals())
 except Exception as e:
     print(f"{{type(e).__name__}}: {{e}}", file=sys.stderr)
     sys.exit(1)
@@ -214,12 +256,16 @@ class SkillExecutor:
         skill_dir = self.skills_dir / skill_name
         venv_dir = skill_dir / ".venv"
 
+        logger.debug(f"检查技能 venv: {venv_dir}")
         if not venv_dir.exists():
+            logger.error(f"技能 venv 不存在: {venv_dir}")
             raise RuntimeError(
                 f"技能 venv 不存在: {skill_dir.name}，请在配置阶段创建 (.venv)"
             )
 
-        return _get_python(venv_dir)
+        python = _get_python(venv_dir)
+        logger.debug(f"技能 {skill_name} 使用 Python: {python}")
+        return python
 
     def run(
         self,
@@ -236,25 +282,31 @@ class SkillExecutor:
         Returns:
             ExecResult
         """
+        logger.info(f"SkillExecutor.run: script={script_path}, args={args}")
+
         # 解析路径
         parts = script_path.split("/", 1)
         skill_name = parts[0]
 
         skill_dir = self.skills_dir / skill_name
         if not skill_dir.is_dir():
+            logger.error(f"技能不存在: {skill_name}")
             return ExecResult(stderr=f"技能不存在: {skill_name}", return_code=1)
 
         full_script = self.skills_dir / script_path
         if not full_script.exists():
+            logger.error(f"脚本不存在: {script_path}")
             return ExecResult(stderr=f"脚本不存在: {script_path}", return_code=1)
 
         # 确保 venv 存在
         try:
             python = self.ensure_venv(skill_name)
         except Exception as e:
+            logger.exception(f"确保 venv 失败: {e}")
             return ExecResult(stderr=f"创建虚拟环境失败: {e}", return_code=1)
 
         cmd = [str(python), str(full_script)] + args
+        logger.debug(f"执行命令: {cmd}")
 
         try:
             result = subprocess.run(
@@ -264,12 +316,19 @@ class SkillExecutor:
                 text=True,
                 timeout=300,
             )
+            logger.debug(f"技能执行完成: return_code={result.returncode}")
+            if result.returncode != 0:
+                logger.warning(
+                    f"技能返回非零: stderr={result.stderr[:200] if result.stderr else ''}"
+                )
             return ExecResult(
                 stdout=result.stdout,
                 stderr=result.stderr,
                 return_code=result.returncode,
             )
         except subprocess.TimeoutExpired:
+            logger.error(f"技能执行超时 (300s): {script_path}")
             return ExecResult(stderr="执行超时 (300s)", return_code=124)
         except Exception as e:
+            logger.exception(f"技能执行异常: {e}")
             return ExecResult(stderr=f"执行错误: {e}", return_code=1)

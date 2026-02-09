@@ -78,6 +78,11 @@ class AEPSession:
 
         logger.debug(f"exec: {command}")
 
+        # 特殊处理: tools run "..." 支持多行代码
+        # shlex.split 会把换行符当作分隔符，导致多行代码被错误拆分
+        if command.startswith("tools run "):
+            return self._handle_tools_run(command[10:])  # 跳过 "tools run "
+
         try:
             parts = shlex.split(command)
         except ValueError as e:
@@ -142,6 +147,66 @@ class AEPSession:
 
         else:
             return ExecResult(stderr=f"未知子命令: {subcmd}", return_code=1)
+
+    def _handle_tools_run(self, code_arg: str) -> ExecResult:
+        """
+        处理 tools run 命令（支持多行代码）
+
+        支持的格式:
+        - tools run "code"
+        - tools run 'code'
+        - tools run \"\"\"multiline code\"\"\"
+        - tools run '''multiline code'''
+
+        Args:
+            code_arg: "tools run " 之后的部分
+        """
+        code_arg = code_arg.strip()
+
+        if not code_arg:
+            return ExecResult(stderr='Usage: tools run "<python_code>"', return_code=1)
+
+        # 提取代码内容（去除引号包裹）
+        code = self._extract_quoted_code(code_arg)
+
+        if code is None:
+            return ExecResult(
+                stderr="代码必须用引号包裹: tools run \"code\" 或 tools run '''code'''",
+                return_code=1,
+            )
+
+        return self.tool_executor.run(
+            code=code,
+            cwd=self.cwd,
+            workspace=self.workspace,
+        )
+
+    def _extract_quoted_code(self, s: str) -> str | None:
+        """
+        从引号包裹的字符串中提取代码
+
+        支持:
+        - "..." 双引号
+        - '...' 单引号
+        - \"\"\"...\"\"\" 三双引号
+        - '''...''' 三单引号
+
+        Returns:
+            提取的代码，如果格式不正确则返回 None
+        """
+        # 三引号优先
+        if s.startswith('"""') and s.endswith('"""') and len(s) >= 6:
+            return s[3:-3]
+        if s.startswith("'''") and s.endswith("'''") and len(s) >= 6:
+            return s[3:-3]
+
+        # 单/双引号
+        if s.startswith('"') and s.endswith('"') and len(s) >= 2:
+            return s[1:-1]
+        if s.startswith("'") and s.endswith("'") and len(s) >= 2:
+            return s[1:-1]
+
+        return None
 
     def _tools_info(self, name: str) -> ExecResult:
         """获取工具详情"""
