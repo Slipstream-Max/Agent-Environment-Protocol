@@ -22,18 +22,19 @@ config_dir/
 │   ├── .venv/               # 共享虚拟环境 (uv 管理)
 │   ├── requirements.txt     # 依赖清单
 │   ├── index.md             # 工具索引
-│   ├── grep.py              # Python 工具
-│   └── _mcp/                # MCP 配置存储
-│       └── filesystem.json
+│   └── grep.py              # Python 工具 / MCP stub
 ├── skills/                   # 技能目录
 │   ├── index.md
-│   └── web-scraper/
-│       ├── .venv/           # 技能独立 venv
-│       ├── SKILL.md
-│       └── main.py
-└── library/                  # 资料库
-    ├── index.md
-    └── api-docs.md
+│   ├── web-scraper/         # 普通技能
+│   └── figma/               # MCP Prompts (自动生成的 skill 目录)
+│       └── SKILL.md
+├── library/                  # 资料库
+│   ├── index.md
+│   └── api-docs.md
+└── _mcp/                     # MCP 配置（外部存储，不挂载到工作区）
+    └── figma/
+        ├── config.json
+        └── manifest.json
 ```
 
 ## 快速开始
@@ -128,13 +129,17 @@ manager.library.remove("doc.md")
 # MCP 处理器
 from aep.core.config import MCPTransport
 
+# STDIO 模式：自动连接并发现 tools/prompts
 manager.mcp.add(
-    name="filesystem",
-    command=["npx", "@anthropic/mcp-server-filesystem"],
+    name="figma",
+    command="npx",
+    args=["figma-mcp-server"],
+    env={"FIGMA_API_KEY": "xxx"}
 )
 
+# HTTP 模式
 manager.mcp.add(
-    name="remote_api",
+    name="remote_tools",
     transport=MCPTransport.HTTP,
     url="http://localhost:8000/mcp",
 )
@@ -202,37 +207,33 @@ git status
 
 ## MCP 集成
 
-AEP 支持 MCP (Model Context Protocol) 服务器，自动转换为统一的工具接口：
+AEP 使用官方 `mcp` SDK 支持 MCP (Model Context Protocol) 服务器，实现能力的连接与**自动发现**：
+
+1. **自动工具发现**：连接后自动查询服务器工具，生成类型化的 Python stub。
+2. **Prompt 映射**：将服务器的 Prompts 模板自动转换为 `skills/{name}/SKILL.md` 文档，供 Agent 查询。
+3. **能力隔离**：MCP 配置存储在顶层 `_mcp/` 目录，不暴露给 Agent，仅暴露 stub 和文档。
 
 ```python
 from aep import EnvManager, MCPTransport
 
 config = EnvManager("./config")
 
-# STDIO 模式（本地进程）
+# 添加时自动连接并发现所有能力
 config.mcp.add(
     name="filesystem",
-    command=["npx", "@anthropic/mcp-server-filesystem", "/workspace"],
-    tools=[
-        {"name": "read_file", "description": "读取文件", 
-         "inputSchema": {"properties": {"path": {"type": "string"}}, "required": ["path"]}}
-    ]
-)
-
-# HTTP 模式（远程服务）
-config.mcp.add(
-    name="remote_api",
-    transport=MCPTransport.HTTP,
-    url="http://localhost:8000/mcp",
-    headers={"Authorization": "Bearer xxx"},
+    command="npx",
+    args=["@anthropic/mcp-server-filesystem", "/workspace"],
 )
 ```
 
 调用方式与普通工具完全一致：
 
 ```python
-session.exec('tools run "tools.filesystem.read_file(\'/etc/hosts\')"')
-session.exec('tools run "tools.remote_api.call(\'tool_name\', arg=\'value\')"')
+# 调用发现的工具
+session.exec('tools run "tools.filesystem.read_file(path=\'/etc/hosts\')"')
+
+# 查看发现的 prompts 文档
+session.exec('skills info filesystem')
 ```
 
 ## 开发

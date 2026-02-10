@@ -348,29 +348,22 @@ grep "authentication" .agent/library/*.md
 
 ## Phase 6: MCP 集成 ✅
 
-**目标**: 支持 MCP Server，**自动转换为 tools** 统一调用
+**目标**: 支持 MCP Server，使用官方 `mcp` SDK **自动发现**并转换为 tools/skills 统一调用
 
-**核心设计**: MCP 服务器添加时自动生成 Python stub 到 `tools/` 目录，Agent 无需学习新命令！
+**核心设计**: MCP 服务器添加时自动连接并查询 `list_tools` 和 `list_prompts`：
+1. **Tools** → 自动生成 Python stub 到 `tools/` 目录。
+2. **Prompts** → 自动生成 `SKILL.md` 文档到 `skills/{name}/` 目录。
 
-**支持两种传输方式**:
-- **STDIO** (默认): 本地进程，通过 stdin/stdout 通信
-- **HTTP**: Streamable HTTP，连接远程 Web 服务
-
-```
-config.add_mcp_server("filesystem", command=["npx", "@anthropic/mcp-server-filesystem"])
-    ↓
-自动生成 tools/filesystem.py (内含 MCP STDIO 调用逻辑)
-    ↓
-Agent 使用 tools run "tools.filesystem.read_file('/path')" 调用
-```
+**能力隔离**: MCP 的配置原始文件存放在顶层 `_mcp/` 目录，该目录**不会**被挂载到 `.agent/` 工作区，Agent 仅能看到生成出的工具和文档。
 
 | 任务 | 产出 | 状态 |
 |------|------|------|
-| add_mcp_server() | 添加 MCP 服务器 + 生成 stub | ✅ Done |
-| STDIO 传输 | 本地进程 JSON-RPC | ✅ Done |
-| HTTP 传输 | Streamable HTTP | ✅ Done |
-| Python stub 生成 | 自动生成工具代码 | ✅ Done |
-| 工具方法生成 | 根据 schema 生成类型化方法 | ✅ Done |
+| mcp SDK 集成 | 引入官方 `mcp` 依赖 | ✅ Done |
+| 自动发现机制 | 自动调用 `list_tools`/`list_prompts` | ✅ Done |
+| STDIO 传输 | 支持本地进程通信 | ✅ Done |
+| HTTP 传输 | 支持 Streamable HTTP | ✅ Done |
+| Python stub 生成 | 根据发现的 Tool Schema 生成方法 | ✅ Done |
+| Prompt 文档化 | 自动生成 `SKILL.md` 文档 | ✅ Done |
 
 **使用方式**:
 ```python
@@ -378,39 +371,31 @@ from aep import EnvManager, MCPTransport
 
 config = EnvManager("./agent_capabilities")
 
-# STDIO 模式（本地进程，默认）
-config.add_mcp_server(
+# 添加时自动连接并发现所有能力
+config.mcp.add(
     name="filesystem",
-    command=["npx", "@anthropic/mcp-server-filesystem", "/workspace"],
-    tools=[  # 可选：提供工具定义生成类型化方法
-        {"name": "read_file", "description": "读取文件", 
-         "inputSchema": {"properties": {"path": {"type": "string"}}, "required": ["path"]}}
-    ]
-)
-
-# HTTP 模式（远程 Web 服务）
-config.add_mcp_server(
-    name="remote_api",
-    transport=MCPTransport.HTTP,
-    url="http://localhost:8000/mcp",
-    headers={"Authorization": "Bearer xxx"},
+    command="npx",
+    args=["@anthropic/mcp-server-filesystem", "/workspace"],
 )
 
 # 运行时 - Agent 统一使用 tools 接口
-session.exec('tools run "tools.filesystem.read_file(\'/etc/hosts\')"')
-session.exec('tools run "tools.remote_api.call(\'some_tool\', arg1=\'value\')"')
+session.exec('tools run "tools.filesystem.read_file(path=\'/etc/hosts\')"')
 ```
 
 **目录结构**:
 ```
 config_dir/
-└── tools/
-    ├── .venv/             # 共享虚拟环境
-    ├── _mcp/              # MCP 配置存储
-    │   └── filesystem.json
-    ├── filesystem.py      # 自动生成的 MCP stub (STDIO)
-    ├── remote_api.py      # 自动生成的 MCP stub (HTTP)
-    └── grep.py            # 普通 Python 工具
+├── tools/
+│   ├── index.md
+│   ├── filesystem.py      # 自动生成的 MCP stub (STDIO)
+│   └── grep.py            # 普通 Python 工具
+├── skills/
+│   └── filesystem/        # MCP Prompts 映射
+│       └── SKILL.md
+└── _mcp/                  # MCP 配置存储（不挂载到工作区）
+    └── filesystem/
+        ├── config.json
+        └── manifest.json
 ```
 
 ---
@@ -472,23 +457,21 @@ result = session.exec("git status")                    # 普通 shell
 agent_capabilities/
 ├── tools/
 │   ├── .venv/             # 共享虚拟环境 (uv 管理)
-│   ├── _mcp/              # MCP 配置存储
-│   │   └── filesystem.json
 │   ├── requirements.txt
 │   ├── index.md
 │   ├── grep.py            # Python 工具
-│   ├── filesystem.py      # MCP 工具 (自动生成)
-│   └── file_edit.py
+│   └── filesystem.py      # MCP 工具 (自动生成)
 ├── skills/
 │   ├── index.md
-│   └── web-scraper/
-│       ├── .venv/         # 技能独立 venv (uv 管理)
-│       ├── requirements.txt
-│       ├── SKILL.md
-│       └── main.py
-└── library/
-    ├── index.md
-    └── api-docs.md
+│   ├── web-scraper/       # 技能独立目录
+│   └── filesystem/        # MCP Prompts (自动生成)
+│       └── SKILL.md
+├── library/
+│   └── index.md
+└── _mcp/                  # MCP 配置存储 (不挂载到工作区)
+    └── filesystem/
+        ├── config.json
+        └── manifest.json
 
 # 工作区 (每个项目)
 my_project/

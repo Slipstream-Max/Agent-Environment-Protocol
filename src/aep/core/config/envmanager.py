@@ -26,18 +26,20 @@ class EnvManager:
     │   ├── .venv/            # 共享虚拟环境 (uv 管理)
     │   ├── requirements.txt  # 依赖清单
     │   ├── index.md          # 工具列表
-    │   ├── grep.py           # Python 工具
-    │   └── _mcp/             # MCP 配置存储
-    │       └── filesystem.json
+    │   └── grep.py           # Python 工具 / MCP stub
     ├── skills/
     │   ├── index.md
-    │   └── web-scraper/
+    │   └── web-scraper/      # 普通技能 / MCP prompts
     │       ├── .venv/
     │       ├── SKILL.md
     │       └── main.py
-    └── library/
-        ├── index.md
-        └── api-docs.md
+    ├── library/
+    │   ├── index.md
+    │   └── api-docs.md
+    └── _mcp/                 # MCP 服务器配置（不挂载到工作区）
+        └── figma/
+            ├── config.json
+            └── manifest.json
     """
 
     def __init__(self, config_dir: str | Path):
@@ -105,7 +107,11 @@ class EnvManager:
         return self._library.add(source, name)
 
     def add_mcp_server(self, name, **kwargs):
-        """添加 MCP 服务器（代理到 mcp.add）"""
+        """添加 MCP 服务器（代理到 mcp.add）
+
+        连接 MCP 服务器，自动发现 tools 和 prompts。
+        详细参数见 MCPHandler.add()
+        """
         return self._mcp.add(name, **kwargs)
 
     def add_tool_dependency(self, *packages):

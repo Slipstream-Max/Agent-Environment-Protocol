@@ -161,8 +161,8 @@ class EnvConfig:
 
     @property
     def mcp_config_dir(self) -> Path:
-        """MCP 配置存储目录"""
-        return self.tools_dir / "_mcp"
+        """MCP 配置存储目录 (config_dir/_mcp/)，不挂载到工作区"""
+        return self.config_dir / "_mcp"
 
     # === 辅助方法 ===
 
@@ -183,8 +183,16 @@ class EnvConfig:
         return self.tools_dir / f"{name}.py"
 
     def mcp_config_path(self, name: str) -> Path:
-        """获取 MCP 配置文件路径"""
-        return self.mcp_config_dir / f"{name}.json"
+        """获取 MCP 服务器配置目录路径"""
+        return self.mcp_config_dir / name
+
+    def mcp_skill_dir(self, name: str) -> Path:
+        """获取 MCP 服务器对应的技能目录（直接放在 skills/{name}/ 下）"""
+        return self.skill_dir(name)
+
+    def mcp_library_dir(self, name: str) -> Path:
+        """获取 MCP 服务器对应的资料目录（直接放在 library/{name}/ 下）"""
+        return self.library_dir / name
 
     def __repr__(self) -> str:
         return f"EnvConfig({self.config_dir})"

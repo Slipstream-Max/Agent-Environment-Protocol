@@ -151,9 +151,12 @@ class ToolsHandler(BaseHandler):
         if tools:
             content += "可用工具列表：\n\n"
             for tool in sorted(tools):
-                # 检查是否是 MCP 工具
-                mcp_config = self.config.mcp_config_path(tool)
-                if mcp_config.exists():
+                # 检查是否是 MCP 工具（配置在 config_dir/_mcp/ 下）
+                mcp_config_dir = self.config.mcp_config_path(tool)
+                if (
+                    mcp_config_dir.is_dir()
+                    and (mcp_config_dir / "config.json").exists()
+                ):
                     content += f'- `{tool}` (MCP): 使用 `tools run "tools.{tool}.<func>(...)"`\n'
                 else:
                     content += (
