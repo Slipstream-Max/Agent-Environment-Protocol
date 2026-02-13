@@ -186,13 +186,5 @@ class EnvConfig:
         """获取 MCP 服务器配置目录路径"""
         return self.mcp_config_dir / name
 
-    def mcp_skill_dir(self, name: str) -> Path:
-        """获取 MCP 服务器对应的技能目录（直接放在 skills/{name}/ 下）"""
-        return self.skill_dir(name)
-
-    def mcp_library_dir(self, name: str) -> Path:
-        """获取 MCP 服务器对应的资料目录（直接放在 library/{name}/ 下）"""
-        return self.library_dir / name
-
     def __repr__(self) -> str:
         return f"EnvConfig({self.config_dir})"

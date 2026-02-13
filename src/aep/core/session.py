@@ -32,7 +32,7 @@ class AEPSession:
     - 上下文获取
 
     注意:
-    - MCP 服务器在配置阶段通过 add_mcp_server() 自动转换为 tools
+    - MCP 服务器在配置阶段通过 add_mcp_server() 自动转换为 tool stub
     - Agent 通过 `tools run "tools.<mcp_name>.<method>(...)"` 统一调用
     """
 

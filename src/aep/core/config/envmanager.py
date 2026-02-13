@@ -29,7 +29,7 @@ class EnvManager:
     │   └── grep.py           # Python 工具 / MCP stub
     ├── skills/
     │   ├── index.md
-    │   └── web-scraper/      # 普通技能 / MCP prompts
+    │   └── web-scraper/      # 普通技能
     │       ├── .venv/
     │       ├── SKILL.md
     │       └── main.py
@@ -109,7 +109,7 @@ class EnvManager:
     def add_mcp_server(self, name, **kwargs):
         """添加 MCP 服务器（代理到 mcp.add）
 
-        连接 MCP 服务器，自动发现 tools 和 prompts。
+        连接 MCP 服务器，自动发现 tools。
         详细参数见 MCPHandler.add()
         """
         return self._mcp.add(name, **kwargs)

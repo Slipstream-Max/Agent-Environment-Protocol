@@ -20,8 +20,6 @@ class TestEnvConfigPaths:
         assert config.library_dir == config.config_dir / "library"
         assert config.mcp_config_dir == config.config_dir / "_mcp"
         assert config.mcp_config_path("test") == config.mcp_config_dir / "test"
-        assert config.mcp_skill_dir("test") == config.skills_dir / "test"
-        assert config.mcp_library_dir("test") == config.library_dir / "test"
 
     def test_tool_path(self, tmp_path: Path):
         """tool_path 返回正确的工具文件路径"""

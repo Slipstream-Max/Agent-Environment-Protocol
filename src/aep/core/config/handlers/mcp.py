@@ -1,10 +1,9 @@
 """
 MCPHandler - MCP 服务器管理处理器
 
-使用官方 mcp SDK 连接 MCP 服务器，自动发现能力（tools/prompts），
-并将它们映射到 AEP 的目录结构中：
+使用官方 mcp SDK 连接 MCP 服务器，自动发现 tool 能力，
+并映射到 AEP 的目录结构中：
   - tools → tools/{name}.py (stub 文件)
-  - prompts → skills/_mcp/{name}/SKILL.md (文档)
 
 每次工具调用都会 spawn 一个新的连接。
 """
@@ -38,10 +37,9 @@ class MCPHandler(BaseHandler):
     核心流程：
     1. add() 接收服务器配置
     2. 检查前置工具 (npx/node/uv)
-    3. 连接 MCP 服务器，自动发现 tools 和 prompts
+    3. 连接 MCP 服务器，自动发现 tools
     4. 生成 tool stub（tools/{name}.py）
-    5. 生成 prompt 文档（skills/_mcp/{name}/SKILL.md）
-    6. 保存配置和 manifest
+    5. 保存配置和 manifest
     """
 
     def __init__(self, config: EnvConfig):
@@ -66,8 +64,8 @@ class MCPHandler(BaseHandler):
         """
         添加 MCP 服务器
 
-        连接到 MCP 服务器，自动发现 tools 和 prompts，
-        生成对应的 stub 文件和文档。
+        连接到 MCP 服务器，自动发现 tools，
+        并生成对应的 stub 文件。
 
         Args:
             name: 服务器名称（将作为工具模块名，推荐用下划线命名）
@@ -141,14 +139,12 @@ class MCPHandler(BaseHandler):
             )
 
         tools_info = discovered.get("tools", [])
-        prompts_info = discovered.get("prompts", [])
 
         # 5. 保存 manifest（发现的元数据缓存）
         manifest = {
             "name": name,
             "transport": transport.value,
             "tools": tools_info,
-            "prompts": prompts_info,
         }
         manifest_file = config_dir / "manifest.json"
         manifest_file.write_text(
@@ -159,13 +155,8 @@ class MCPHandler(BaseHandler):
         # 6. 生成 tool stub
         stub_file = self._generate_stub(name, transport, mcp_config, tools_info)
 
-        # 7. 生成 prompt 文档 (→ skills/_mcp/{name}/SKILL.md)
-        if prompts_info:
-            self._generate_prompt_docs(name, prompts_info)
-
         logger.info(
-            f"MCP 服务器添加完成: {name} "
-            f"(发现 {len(tools_info)} 个工具, {len(prompts_info)} 个 prompt)"
+            f"MCP 服务器添加完成: {name} (发现 {len(tools_info)} 个工具)"
         )
         return stub_file
 
@@ -188,14 +179,14 @@ class MCPHandler(BaseHandler):
         return MCPServerConfig.from_dict(data)
 
     def get_manifest(self, name: str) -> Optional[dict]:
-        """获取 MCP 服务器 manifest（发现的能力缓存）"""
+        """获取 MCP 服务器 manifest（发现的工具缓存）"""
         manifest_file = self.config.mcp_config_path(name) / "manifest.json"
         if not manifest_file.exists():
             return None
         return json.loads(manifest_file.read_text(encoding="utf-8"))
 
     def remove(self, name: str) -> bool:
-        """删除 MCP 服务器（包括 stub、配置、skill 文档）"""
+        """删除 MCP 服务器（包括 stub 和配置）"""
         removed = False
 
         # 删除 tool stub
@@ -208,18 +199,6 @@ class MCPHandler(BaseHandler):
         config_dir = self.config.mcp_config_path(name)
         if config_dir.exists():
             shutil.rmtree(config_dir)
-            removed = True
-
-        # 删除 skills 文档
-        skill_dir = self.config.mcp_skill_dir(name)
-        if skill_dir.exists():
-            shutil.rmtree(skill_dir)
-            removed = True
-
-        # 删除 library 文档
-        library_dir = self.config.mcp_library_dir(name)
-        if library_dir.exists():
-            shutil.rmtree(library_dir)
             removed = True
 
         if removed:
@@ -239,14 +218,12 @@ class MCPHandler(BaseHandler):
         discovered = asyncio.run(self._discover(name, transport, config))
 
         tools_info = discovered.get("tools", [])
-        prompts_info = discovered.get("prompts", [])
 
         # 更新 manifest
         manifest = {
             "name": name,
             "transport": transport.value,
             "tools": tools_info,
-            "prompts": prompts_info,
         }
         manifest_file = self.config.mcp_config_path(name) / "manifest.json"
         manifest_file.write_text(
@@ -254,14 +231,11 @@ class MCPHandler(BaseHandler):
             encoding="utf-8",
         )
 
-        # 重新生成 stub 和文档
+        # 重新生成 stub
         stub_file = self._generate_stub(name, transport, config, tools_info)
-        if prompts_info:
-            self._generate_prompt_docs(name, prompts_info)
 
         logger.info(
-            f"MCP 服务器刷新完成: {name} "
-            f"(发现 {len(tools_info)} 个工具, {len(prompts_info)} 个 prompt)"
+            f"MCP 服务器刷新完成: {name} (发现 {len(tools_info)} 个工具)"
         )
         return stub_file
 
@@ -274,15 +248,15 @@ class MCPHandler(BaseHandler):
         config: MCPServerConfig,
     ) -> dict[str, list[dict]]:
         """
-        连接 MCP 服务器并发现其暴露的 tools 和 prompts
+        连接 MCP 服务器并发现其暴露的 tools
 
         Returns:
-            {"tools": [...], "prompts": [...]}
+            {"tools": [...]}
         """
         from mcp import ClientSession, StdioServerParameters
         from mcp.client.stdio import stdio_client
 
-        result: dict[str, list[dict]] = {"tools": [], "prompts": []}
+        result: dict[str, list[dict]] = {"tools": []}
 
         if transport == MCPTransport.STDIO:
             server_params = StdioServerParameters(
@@ -312,9 +286,8 @@ class MCPHandler(BaseHandler):
         return result
 
     async def _fetch_capabilities(self, session: Any) -> dict[str, list[dict]]:
-        """从已连接的 session 中获取 tools 和 prompts"""
+        """从已连接的 session 中获取 tools"""
         tools: list[dict] = []
-        prompts: list[dict] = []
 
         # 获取工具列表
         try:
@@ -332,28 +305,7 @@ class MCPHandler(BaseHandler):
         except Exception as e:
             logger.warning(f"获取工具列表失败: {e}")
 
-        # 获取 prompt 列表
-        try:
-            prompts_result = await session.list_prompts()
-            for prompt in prompts_result.prompts:
-                prompt_info: dict[str, Any] = {
-                    "name": prompt.name,
-                    "description": prompt.description or "",
-                }
-                if hasattr(prompt, "arguments") and prompt.arguments:
-                    prompt_info["arguments"] = [
-                        {
-                            "name": arg.name,
-                            "description": getattr(arg, "description", "") or "",
-                            "required": getattr(arg, "required", False),
-                        }
-                        for arg in prompt.arguments
-                    ]
-                prompts.append(prompt_info)
-        except Exception as e:
-            logger.warning(f"获取 prompt 列表失败: {e}")
-
-        return {"tools": tools, "prompts": prompts}
+        return {"tools": tools}
 
     # ==================== Prerequisites ====================
 
@@ -571,43 +523,3 @@ def {tool_name}({params_str}):
 
         return "\n".join(methods)
 
-    # ==================== Prompt Documentation ====================
-
-    def _generate_prompt_docs(self, name: str, prompts_info: list[dict]) -> None:
-        """
-        将 MCP prompts 转换为 SKILL.md 文档
-
-        存储在 skills/_mcp/{name}/SKILL.md
-        """
-        skill_dir = self.config.mcp_skill_dir(name)
-        skill_dir.mkdir(parents=True, exist_ok=True)
-
-        content = f"# MCP Prompts: {name}\n\n"
-        content += f"来自 MCP 服务器 `{name}` 的可用 Prompt 模板。\n\n"
-
-        for prompt in prompts_info:
-            prompt_name = prompt["name"]
-            description = prompt.get("description", "")
-            arguments = prompt.get("arguments", [])
-
-            content += f"## {prompt_name}\n\n"
-            if description:
-                content += f"{description}\n\n"
-
-            if arguments:
-                content += "**参数:**\n\n"
-                for arg in arguments:
-                    required_mark = " *(必需)*" if arg.get("required") else ""
-                    arg_desc = arg.get("description", "")
-                    content += f"- `{arg['name']}`{required_mark}: {arg_desc}\n"
-                content += "\n"
-
-            # 调用示例
-            content += "**调用方式:**\n"
-            content += "```\n"
-            content += f"tools run \"tools.{name}.call('prompts/get', name='{prompt_name}'...)\"\n"
-            content += "```\n\n"
-
-        skill_md = skill_dir / "SKILL.md"
-        skill_md.write_text(content, encoding="utf-8")
-        logger.info(f"生成 MCP prompt 文档: {skill_md}")

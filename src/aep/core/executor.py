@@ -6,7 +6,7 @@ AEP Executors - 独立的代码执行器
 ToolExecutor: 在共享的虚拟环境中执行 Python 工具代码
 SkillExecutor: 在技能专属的虚拟环境中执行脚本
 
-注意: MCP 服务器通过 config.add_mcp_server() 自动转换为 tools
+注意: MCP 服务器通过 config.add_mcp_server() 自动转换为 tool stub
 """
 
 import shutil

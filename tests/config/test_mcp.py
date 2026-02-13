@@ -5,7 +5,6 @@ MCPHandler 集成测试
 """
 
 import sys
-import json
 import pytest
 from pathlib import Path
 
@@ -45,8 +44,8 @@ class TestMCPAddStdio:
         assert "echo" in tool_names
         assert "add" in tool_names
 
-    def test_add_discovers_prompts(self, handler: MCPHandler):
-        """add 能发现 MCP 服务器暴露的 prompts"""
+    def test_manifest_is_tool_only(self, handler: MCPHandler):
+        """manifest 仅包含 tools 元数据"""
         handler.add(
             "echo",
             command=sys.executable,
@@ -55,8 +54,8 @@ class TestMCPAddStdio:
 
         manifest = handler.get_manifest("echo")
         assert manifest is not None
-        prompt_names = [p["name"] for p in manifest["prompts"]]
-        assert "greeting" in prompt_names
+        assert "tools" in manifest
+        assert "prompts" not in manifest
 
     def test_stub_contains_tool_functions(self, handler: MCPHandler):
         """生成的 stub 文件包含发现的工具函数"""
@@ -106,21 +105,17 @@ class TestMCPAddStdio:
         assert config.command[0] == sys.executable
         assert ECHO_SERVER in config.command
 
-    def test_prompt_docs_generated(self, handler: MCPHandler, manager: EnvManager):
-        """MCP prompts 生成 SKILL.md 文档"""
+    def test_no_prompt_docs_generated(self, handler: MCPHandler, manager: EnvManager):
+        """tool-only 模式下不生成 SKILL.md 文档"""
         handler.add(
             "echo",
             command=sys.executable,
             args=[ECHO_SERVER],
         )
 
-        skill_dir = manager.config.mcp_skill_dir("echo")
+        skill_dir = manager.config.skills_dir / "echo"
         skill_md = skill_dir / "SKILL.md"
-        assert skill_md.exists()
-
-        content = skill_md.read_text(encoding="utf-8")
-        assert "greeting" in content
-        assert "name" in content
+        assert not skill_md.exists()
 
 
 class TestMCPList:
@@ -203,16 +198,16 @@ class TestMCPRemove:
         handler.remove("echo")
         assert not config_dir.exists()
 
-    def test_remove_cleans_skills(self, handler: MCPHandler, manager: EnvManager):
-        """删除时清理 skill 文档"""
+    def test_remove_keeps_skills_untouched(self, handler: MCPHandler, manager: EnvManager):
+        """tool-only 模式下 remove 不负责清理 skills 目录"""
         handler.add(
             "echo",
             command=sys.executable,
             args=[ECHO_SERVER],
         )
 
-        skill_dir = manager.config.mcp_skill_dir("echo")
-        assert skill_dir.exists()
+        skill_dir = manager.config.skills_dir / "echo"
+        assert not skill_dir.exists()
 
         handler.remove("echo")
         assert not skill_dir.exists()

@@ -25,9 +25,7 @@ config_dir/
 │   └── grep.py              # Python 工具 / MCP stub
 ├── skills/                   # 技能目录
 │   ├── index.md
-│   ├── web-scraper/         # 普通技能
-│   └── figma/               # MCP Prompts (自动生成的 skill 目录)
-│       └── SKILL.md
+│   └── web-scraper/         # 普通技能
 ├── library/                  # 资料库
 │   ├── index.md
 │   └── api-docs.md
@@ -129,7 +127,7 @@ manager.library.remove("doc.md")
 # MCP 处理器
 from aep.core.config import MCPTransport
 
-# STDIO 模式：自动连接并发现 tools/prompts
+# STDIO 模式：自动连接并发现 tools
 manager.mcp.add(
     name="figma",
     command="npx",
@@ -210,8 +208,8 @@ git status
 AEP 使用官方 `mcp` SDK 支持 MCP (Model Context Protocol) 服务器，实现能力的连接与**自动发现**：
 
 1. **自动工具发现**：连接后自动查询服务器工具，生成类型化的 Python stub。
-2. **Prompt 映射**：将服务器的 Prompts 模板自动转换为 `skills/{name}/SKILL.md` 文档，供 Agent 查询。
-3. **能力隔离**：MCP 配置存储在顶层 `_mcp/` 目录，不暴露给 Agent，仅暴露 stub 和文档。
+2. **Tool-Only 设计**：仅保留工具能力，不处理 prompts/resources 的映射与落地。
+3. **能力隔离**：MCP 配置存储在顶层 `_mcp/` 目录，不暴露给 Agent，仅暴露 tool stub。
 
 ```python
 from aep import EnvManager, MCPTransport
@@ -231,9 +229,6 @@ config.mcp.add(
 ```python
 # 调用发现的工具
 session.exec('tools run "tools.filesystem.read_file(path=\'/etc/hosts\')"')
-
-# 查看发现的 prompts 文档
-session.exec('skills info filesystem')
 ```
 
 ## 开发
