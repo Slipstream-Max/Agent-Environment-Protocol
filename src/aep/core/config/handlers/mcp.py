@@ -1,4 +1,4 @@
-"""
+﻿"""
 MCPHandler - MCP 服务器管理处理器
 
 使用官方 mcp SDK 连接 MCP 服务器，自动发现 tool 能力，
@@ -13,9 +13,10 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+from contextlib import asynccontextmanager
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, AsyncIterator, Optional
 
 from loguru import logger
 
@@ -39,7 +40,7 @@ class MCPHandler(BaseHandler):
     2. 检查前置工具 (npx/node/uv)
     3. 连接 MCP 服务器，自动发现 tools
     4. 生成 tool stub（tools/{name}.py）
-    5. 保存配置和 manifest
+    5. 保存配置
     """
 
     def __init__(self, config: EnvConfig):
@@ -96,13 +97,7 @@ class MCPHandler(BaseHandler):
                 url="http://localhost:8000/mcp",
             )
         """
-        # 1. 验证参数
-        if transport == MCPTransport.STDIO:
-            if not command:
-                raise ValueError("STDIO 模式需要提供 command 参数")
-        elif transport == MCPTransport.HTTP:
-            if not url:
-                raise ValueError("HTTP 模式需要提供 url 参数")
+        self._validate_transport_args(transport, command=command, url=url)
 
         # 2. 检查前置工具
         if transport == MCPTransport.STDIO:
@@ -140,19 +135,7 @@ class MCPHandler(BaseHandler):
 
         tools_info = discovered.get("tools", [])
 
-        # 5. 保存 manifest（发现的元数据缓存）
-        manifest = {
-            "name": name,
-            "transport": transport.value,
-            "tools": tools_info,
-        }
-        manifest_file = config_dir / "manifest.json"
-        manifest_file.write_text(
-            json.dumps(manifest, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-
-        # 6. 生成 tool stub
+        # 5. 生成 tool stub
         stub_file = self._generate_stub(name, transport, mcp_config, tools_info)
 
         logger.info(
@@ -177,13 +160,6 @@ class MCPHandler(BaseHandler):
             return None
         data = json.loads(config_file.read_text(encoding="utf-8"))
         return MCPServerConfig.from_dict(data)
-
-    def get_manifest(self, name: str) -> Optional[dict]:
-        """获取 MCP 服务器 manifest（发现的工具缓存）"""
-        manifest_file = self.config.mcp_config_path(name) / "manifest.json"
-        if not manifest_file.exists():
-            return None
-        return json.loads(manifest_file.read_text(encoding="utf-8"))
 
     def remove(self, name: str) -> bool:
         """删除 MCP 服务器（包括 stub 和配置）"""
@@ -219,18 +195,6 @@ class MCPHandler(BaseHandler):
 
         tools_info = discovered.get("tools", [])
 
-        # 更新 manifest
-        manifest = {
-            "name": name,
-            "transport": transport.value,
-            "tools": tools_info,
-        }
-        manifest_file = self.config.mcp_config_path(name) / "manifest.json"
-        manifest_file.write_text(
-            json.dumps(manifest, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-
         # 重新生成 stub
         stub_file = self._generate_stub(name, transport, config, tools_info)
 
@@ -251,41 +215,59 @@ class MCPHandler(BaseHandler):
         连接 MCP 服务器并发现其暴露的 tools
 
         Returns:
-            {"tools": [...]}
+            {"tools": [...]} 
         """
-        from mcp import ClientSession, StdioServerParameters
-        from mcp.client.stdio import stdio_client
+        from mcp import ClientSession
 
         result: dict[str, list[dict]] = {"tools": []}
 
-        if transport == MCPTransport.STDIO:
-            server_params = StdioServerParameters(
-                command=config.command[0] if config.command else "",
-                args=config.command[1:]
-                if config.command and len(config.command) > 1
-                else [],
-                env=config.env if config.env else None,
-            )
-
-            async with stdio_client(server_params) as (read, write):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    result = await self._fetch_capabilities(session)
-
-        elif transport == MCPTransport.HTTP:
-            from mcp.client.streamable_http import streamable_http_client
-
-            async with streamable_http_client(
-                config.url,
-                headers=config.headers if config.headers else None,
-            ) as (read, write, _):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    result = await self._fetch_capabilities(session)
+        async with self._connect(transport, config) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await self._fetch_tools(session)
 
         return result
 
-    async def _fetch_capabilities(self, session: Any) -> dict[str, list[dict]]:
+    @asynccontextmanager
+    async def _connect(
+        self,
+        transport: MCPTransport,
+        config: MCPServerConfig,
+    ) -> AsyncIterator[tuple[Any, Any]]:
+        """统一连接抽象：根据 transport 建立会话流。"""
+        match transport:
+            case MCPTransport.STDIO:
+                from mcp import StdioServerParameters
+                from mcp.client.stdio import stdio_client
+
+                server_params = StdioServerParameters(
+                    command=config.command[0] if config.command else "",
+                    args=config.command[1:]
+                    if config.command and len(config.command) > 1
+                    else [],
+                    env=config.env if config.env else None,
+                )
+
+                async with stdio_client(server_params) as streams:
+                    yield streams
+
+            case MCPTransport.HTTP:
+                import httpx
+                from mcp.client.streamable_http import streamable_http_client
+
+                async with httpx.AsyncClient(
+                    headers=config.headers if config.headers else None
+                ) as http_client:
+                    async with streamable_http_client(
+                        config.url or "",
+                        http_client=http_client,
+                    ) as (read, write, _):
+                        yield (read, write)
+
+            case _:
+                raise ValueError(f"不支持的 MCP transport: {transport.value}")
+
+    async def _fetch_tools(self, session: Any) -> dict[str, list[dict]]:
         """从已连接的 session 中获取 tools"""
         tools: list[dict] = []
 
@@ -336,10 +318,7 @@ class MCPHandler(BaseHandler):
         """生成工具 stub 文件（使用 mcp SDK 调用）"""
 
         # 构建连接参数的 Python 代码
-        if transport == MCPTransport.STDIO:
-            connect_code = self._build_stdio_connect_code(config)
-        else:
-            connect_code = self._build_http_connect_code(config)
+        connect_code = self._build_connect_code(transport, config)
 
         # 构建工具方法
         methods_code = self._build_tool_methods(tools_info)
@@ -366,8 +345,7 @@ class MCPHandler(BaseHandler):
         stub_content = f'''{docstring}
 
 import asyncio
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+from mcp import ClientSession
 
 {connect_code}
 
@@ -415,6 +393,20 @@ def call(tool_name: str, **kwargs):
         stub_file.write_text(stub_content, encoding="utf-8")
         return stub_file
 
+    def _build_connect_code(
+        self,
+        transport: MCPTransport,
+        config: MCPServerConfig,
+    ) -> str:
+        """统一连接代码构建入口。"""
+        match transport:
+            case MCPTransport.STDIO:
+                return self._build_stdio_connect_code(config)
+            case MCPTransport.HTTP:
+                return self._build_http_connect_code(config)
+            case _:
+                raise ValueError(f"不支持的 MCP transport: {transport.value}")
+
     def _build_stdio_connect_code(self, config: MCPServerConfig) -> str:
         """生成 STDIO 连接代码"""
         command = config.command[0] if config.command else ""
@@ -423,6 +415,8 @@ def call(tool_name: str, **kwargs):
 
         return f'''
 from contextlib import asynccontextmanager
+from mcp import StdioServerParameters
+from mcp.client.stdio import stdio_client
 
 _SERVER_PARAMS = StdioServerParameters(
     command={json.dumps(command)},
@@ -439,12 +433,13 @@ async def _connect():
 '''
 
     def _build_http_connect_code(self, config: MCPServerConfig) -> str:
-        """生成 HTTP 连接代码"""
+        """生成 HTTP (Streamable HTTP) 连接代码"""
         url = json.dumps(config.url or "")
         headers = json.dumps(config.headers or {})
 
         return f'''
 from contextlib import asynccontextmanager
+import httpx
 from mcp.client.streamable_http import streamable_http_client
 
 _MCP_URL = {url}
@@ -454,8 +449,9 @@ _MCP_HEADERS = {headers}
 @asynccontextmanager
 async def _connect():
     """建立 Streamable HTTP 连接"""
-    async with streamable_http_client(_MCP_URL, headers=_MCP_HEADERS or None) as (read, write, _):
-        yield (read, write)
+    async with httpx.AsyncClient(headers=_MCP_HEADERS or None) as http_client:
+        async with streamable_http_client(_MCP_URL, http_client=http_client) as (read, write, _):
+            yield (read, write)
 '''
 
     def _build_tool_methods(self, tools_info: list[dict]) -> str:
@@ -523,3 +519,22 @@ def {tool_name}({params_str}):
 
         return "\n".join(methods)
 
+    # ==================== Internal Utils ====================
+
+    def _validate_transport_args(
+        self,
+        transport: MCPTransport,
+        *,
+        command: Optional[str],
+        url: Optional[str],
+    ) -> None:
+        """验证不同 transport 的参数完整性。"""
+        match transport:
+            case MCPTransport.STDIO:
+                if not command:
+                    raise ValueError("STDIO 模式需要提供 command 参数")
+            case MCPTransport.HTTP:
+                if not url:
+                    raise ValueError("HTTP 模式需要提供 url 参数")
+            case _:
+                raise ValueError(f"不支持的 MCP transport: {transport.value}")

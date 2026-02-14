@@ -1,254 +1,208 @@
 """
-AEP 使用示例
+AEP 快速入门完整示例
 
-演示完整的 Config -> Attach -> Session 流程
+流程:
+1. 配置阶段: 初始化工具环境、添加 tools/skills/library/MCP
+2. 挂载阶段: attach 到 workspace
+3. 运行阶段: 统一通过 session.exec() 调用
+
+运行:
+    uv run python examples/demo.py
+    uv run python examples/demo.py --no-default-deps
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+import tempfile
+from pathlib import Path
+
+from aep import AEP, EnvManager
+from aep.core.config.handlers.mcp import MCPTransport
+
+ECHO_SERVER = Path(__file__).resolve().parents[1] / "tests" / "mcp" / "echo_server.py"
+
+TOOL_SOURCE = '''"""
+data_lab - 数据处理工具（依赖 numpy/pandas/matplotlib）
+
+Usage:
+    tools run "df = tools.data_lab.make_df(10); tools.data_lab.describe_df(df)"
 """
 
 from pathlib import Path
-import tempfile
-import shutil
 
-from aep import EnvManager, AEP
-
-
-def main():
-    # 使用临时目录进行演示
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir = Path(tmpdir)
-
-        # === 准备测试文件 ===
-
-        # 创建一个示例工具
-        tool_source = tmpdir / "grep_tool.py"
-        tool_source.write_text(
-            '''"""
-grep - 在文件中搜索模式
-
-Usage:
-    tools run "tools.grep.search(pattern, path)"
-    tools run "tools.grep.count(pattern, path)"
-"""
-
-import re
-from pathlib import Path as P
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 
 
-def search(pattern: str, path: str = ".") -> list[dict]:
-    """搜索匹配的行"""
-    results = []
-    root = P(path)
-    
-    files = [root] if root.is_file() else root.rglob("*")
-    
-    for file in files:
-        if file.is_file() and file.suffix in [".py", ".md", ".txt", ".json"]:
-            try:
-                content = file.read_text(encoding="utf-8")
-                for i, line in enumerate(content.splitlines(), 1):
-                    if re.search(pattern, line):
-                        results.append({
-                            "file": str(file),
-                            "line": i,
-                            "content": line.strip()
-                        })
-            except:
-                pass
-    
-    return results
+def make_df(rows: int = 20) -> pd.DataFrame:
+    rng = np.random.default_rng(42)
+    data = {
+        "x": np.arange(rows),
+        "value": rng.normal(loc=0.0, scale=1.0, size=rows),
+    }
+    return pd.DataFrame(data)
 
 
-def count(pattern: str, path: str = ".") -> int:
-    """计数匹配数量"""
-    return len(search(pattern, path))
-''',
-            encoding="utf-8",
-        )
+def describe_df(df: pd.DataFrame) -> dict:
+    return {
+        "rows": int(df.shape[0]),
+        "columns": list(df.columns),
+        "mean_of_value": float(df["value"].mean()),
+    }
 
-        # 创建一个示例技能目录
-        skill_source = tmpdir / "hello_skill"
-        skill_source.mkdir()
-        (skill_source / "main.py").write_text(
-            '''#!/usr/bin/env python3
-"""Hello World 技能"""
+
+def save_plot(df: pd.DataFrame, output: str = "plot.png") -> str:
+    out = Path(output).resolve()
+    fig, ax = plt.subplots()
+    ax.plot(df["x"], df["value"])
+    ax.set_title("data_lab demo")
+    fig.savefig(out)
+    plt.close(fig)
+    return str(out)
+'''
+
+SKILL_MAIN = '''#!/usr/bin/env python3
+"""生成一段简短报告"""
 
 import sys
 
-def main():
-    name = sys.argv[1] if len(sys.argv) > 1 else "World"
-    print(f"Hello, {name}!")
+
+def main() -> None:
+    name = sys.argv[1] if len(sys.argv) > 1 else "User"
+    print(f"[report] Hello, {name}. This report skill is wired and runnable.")
+
 
 if __name__ == "__main__":
     main()
-''',
-            encoding="utf-8",
-        )
-        (skill_source / "SKILL.md").write_text(
-            """# Hello Skill
+'''
 
-一个简单的问候技能。
+SKILL_MD = """# Report Skill
 
-## Usage
+一个最小技能示例，用于演示 `skills run`。
+"""
 
-```bash
-skills run hello_skill/main.py [name]
-```
+LIBRARY_DOC = """# Quickstart Notes
 
-## Examples
+- tools 用于执行 Python 工具代码
+- skills 用于执行脚本型能力
+- library 用于沉淀文档/知识
+- MCP server 会被转成 tools 下的可调用模块
+"""
 
-```bash
-skills run hello_skill/main.py
-# Output: Hello, World!
 
-skills run hello_skill/main.py Alice
-# Output: Hello, Alice!
-```
-""",
-            encoding="utf-8",
-        )
+def run_and_print(session, command: str) -> None:
+    print(f"\n>>> {command}")
+    result = session.exec(command)
+    if result.stdout:
+        print(result.stdout.strip())
+    if result.stderr:
+        print("[stderr]")
+        print(result.stderr.strip())
 
-        # 创建一个示例资料
-        library_source = tmpdir / "api_docs.md"
-        library_source.write_text(
-            """# API 文档
 
-## 认证
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--no-default-deps",
+        action="store_true",
+        help="不自动安装默认工具依赖 (numpy/pandas/matplotlib/mcp)",
+    )
+    parser.add_argument(
+        "--extra-tool-dep",
+        action="append",
+        default=[],
+        help="额外追加工具依赖，可重复传入",
+    )
+    args = parser.parse_args()
 
-所有 API 请求需要在 Header 中包含 `Authorization: Bearer <token>`。
-
-## 端点
-
-### GET /users
-
-获取用户列表。
-
-### POST /users
-
-创建新用户。
-
-Request Body:
-```json
-{
-  "name": "string",
-  "email": "string"
-}
-```
-""",
-            encoding="utf-8",
-        )
-
-        # === 阶段一：配置阶段 ===
-        print("=" * 60)
-        print("阶段一：配置阶段 (EnvManager)")
-        print("=" * 60)
-
-        config_dir = tmpdir / "agent_capabilities"
-        config = EnvManager(config_dir)
-
-        # 添加工具
-        config.add_tool(tool_source, name="grep")
-
-        # 添加技能
-        config.add_skill(skill_source)
-
-        # 添加资料
-        config.add_library(library_source, name="api-docs.md")
-
-        # 生成索引
-        config.index()
-
-        print(f"\n配置目录: {config_dir}")
-        print("\n目录结构:")
-        for item in sorted(config_dir.rglob("*")):
-            rel = item.relative_to(config_dir)
-            indent = "  " * (len(rel.parts) - 1)
-            print(f"  {indent}{item.name}")
-
-        # === 阶段二：挂载阶段 ===
-        print("\n" + "=" * 60)
-        print("阶段二：挂载阶段 (AEP.attach)")
-        print("=" * 60)
-
-        workspace = tmpdir / "my_project"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        config_dir = root / "agent_config"
+        workspace = root / "workspace"
         workspace.mkdir()
 
-        # 在工作区创建一些测试文件
-        src_dir = workspace / "src"
-        src_dir.mkdir()
-        (src_dir / "main.py").write_text(
-            """# TODO: implement main function
-def main():
-    pass  # TODO: add logic
-""",
-            encoding="utf-8",
-        )
+        # 准备源文件
+        tool_file = root / "data_lab.py"
+        tool_file.write_text(TOOL_SOURCE, encoding="utf-8")
 
+        skill_dir = root / "report_skill"
+        skill_dir.mkdir()
+        (skill_dir / "main.py").write_text(SKILL_MAIN, encoding="utf-8")
+        (skill_dir / "SKILL.md").write_text(SKILL_MD, encoding="utf-8")
+
+        library_file = root / "quickstart.md"
+        library_file.write_text(LIBRARY_DOC, encoding="utf-8")
+
+        print("=" * 64)
+        print("1) 配置阶段")
+        print("=" * 64)
+
+        config = EnvManager(
+            config_dir,
+            auto_init_tool_env=True,
+            include_default_tool_dependencies=not args.no_default_deps,
+            tool_dependencies=args.extra_tool_dep or None,
+        )
+        print(f"配置目录: {config_dir}")
+        print(f"默认工具依赖: {', '.join(config.DEFAULT_TOOL_DEPENDENCIES)}")
+
+        # 添加 tools / skills / library
+        config.add_tool(tool_file, name="data_lab")
+        config.add_skill(skill_dir, name="report_skill")
+        config.add_library(library_file, name="quickstart.md")
+
+        # 添加 MCP server (stdio)
+        config.add_mcp_server(
+            "echo_mcp",
+            transport=MCPTransport.STDIO,
+            command=sys.executable,
+            args=[str(ECHO_SERVER)],
+        )
+        config.index()
+
+        req_file = config.tools_dir / "requirements.txt"
+        if req_file.exists():
+            print("\n[tools requirements.txt]")
+            print(req_file.read_text(encoding="utf-8").strip())
+
+        print("\n" + "=" * 64)
+        print("2) 挂载阶段")
+        print("=" * 64)
         aep = AEP.attach(workspace=workspace, config=config)
-
-        print(f"\n工作区: {workspace}")
-        print("\n.agent/ 结构:")
-        agent_dir = workspace / ".agent"
-        for item in sorted(agent_dir.iterdir()):
-            target = item.resolve() if item.is_symlink() else item
-            print(f"  {item.name} -> {target}")
-
-        # === 阶段三：运行时 ===
-        print("\n" + "=" * 60)
-        print("阶段三：运行时 (AEPSession.exec)")
-        print("=" * 60)
-
         session = aep.create_session()
+        print(f"工作区: {workspace}")
 
-        # 测试 1: tools list
-        print("\n>>> session.exec('tools list')")
-        result = session.exec("tools list")
-        print(result.stdout)
+        print("\n" + "=" * 64)
+        print("3) 运行阶段")
+        print("=" * 64)
+        run_and_print(session, "tools list")
+        run_and_print(session, "skills list")
+        run_and_print(session, "cat .agent/library/quickstart.md")
 
-        # 测试 2: tools info
-        print(">>> session.exec('tools info grep')")
-        result = session.exec("tools info grep")
-        print(
-            result.stdout[:200] + "..." if len(result.stdout) > 200 else result.stdout
-        )
+        # 单个 tools run 代码块里同时调用本地工具和 MCP 工具
+        code = """
+df = tools.data_lab.make_df(12)
+summary = tools.data_lab.describe_df(df)
+plot_path = tools.data_lab.save_plot(df, output='demo_plot.png')
+echo_text = tools.echo_mcp.echo(message='hello from mcp stdio')
+sum_text = tools.echo_mcp.add(a=7, b=8)
+print('summary:', summary)
+print('plot_path:', plot_path)
+print('mcp_echo:', echo_text)
+print('mcp_add:', sum_text)
+""".strip()
+        run_and_print(session, f"tools run '''{code}'''")
 
-        # 测试 3: tools run
-        print(
-            "\n>>> session.exec('tools run \"tools.grep.search(\\'TODO\\', \\'.\\')')\""
-        )
-        result = session.exec("tools run \"tools.grep.search('TODO', '.')\"")
-        print(result.stdout)
-        if result.stderr:
-            print(f"stderr: {result.stderr}")
+        run_and_print(session, "skills run report_skill/main.py AEP")
 
-        # 测试 4: skills list
-        print(">>> session.exec('skills list')")
-        result = session.exec("skills list")
-        print(result.stdout)
-
-        # 测试 5: skills run
-        print(">>> session.exec('skills run hello_skill/main.py AEP')")
-        result = session.exec("skills run hello_skill/main.py AEP")
-        print(result.stdout)
-
-        # 测试 6: shell 透传
-        print(">>> session.exec('ls .agent/library/')")
-        result = session.exec("ls .agent/library/")
-        print(result.stdout)
-
-        # 测试 7: cat 资料
-        print(">>> session.exec('cat .agent/library/api-docs.md')")
-        result = session.exec("cat .agent/library/api-docs.md")
-        print(
-            result.stdout[:300] + "..." if len(result.stdout) > 300 else result.stdout
-        )
-
-        # 测试 8: get_context
-        print("\n>>> session.get_context()")
-        context = session.get_context()
-        print(context[:500] + "..." if len(context) > 500 else context)
-
-        print("\n" + "=" * 60)
-        print("测试完成！")
-        print("=" * 60)
+        print("\n" + "=" * 64)
+        print("完成: 你现在可以基于这个模板扩展自己的 agent 能力栈")
+        print("=" * 64)
 
 
 if __name__ == "__main__":

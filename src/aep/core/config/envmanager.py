@@ -38,16 +38,32 @@ class EnvManager:
     │   └── api-docs.md
     └── _mcp/                 # MCP 服务器配置（不挂载到工作区）
         └── figma/
-            ├── config.json
-            └── manifest.json
+            └── config.json
     """
 
-    def __init__(self, config_dir: str | Path):
+    DEFAULT_TOOL_DEPENDENCIES = (
+        "numpy",
+        "pandas",
+        "matplotlib",
+        "mcp",
+    )
+
+    def __init__(
+        self,
+        config_dir: str | Path,
+        *,
+        auto_init_tool_env: bool = False,
+        include_default_tool_dependencies: bool = True,
+        tool_dependencies: list[str] | None = None,
+    ):
         """
         初始化配置管理器
 
         Args:
             config_dir: 配置目录路径，将自动创建子目录结构
+            auto_init_tool_env: 是否在初始化时自动准备 tools 环境
+            include_default_tool_dependencies: 自动初始化时是否包含默认依赖
+            tool_dependencies: 自动初始化时追加的自定义依赖
         """
         self.config = EnvConfig(config_dir)
 
@@ -59,6 +75,12 @@ class EnvManager:
 
         # 创建目录结构
         self._init_dirs()
+
+        if auto_init_tool_env:
+            self.init_tool_environment(
+                dependencies=tool_dependencies,
+                include_default=include_default_tool_dependencies,
+            )
 
         logger.info(f"EnvManager 初始化: {self.config.config_dir}")
 
@@ -117,6 +139,39 @@ class EnvManager:
     def add_tool_dependency(self, *packages):
         """添加工具依赖（代理到 tools.add_dependencies）"""
         return self._tools.add_dependencies(*packages)
+
+    def init_tool_environment(
+        self,
+        *,
+        dependencies: list[str] | None = None,
+        include_default: bool = True,
+    ) -> Path:
+        """
+        初始化 tools 运行环境（venv + 默认/自定义依赖）
+
+        Args:
+            dependencies: 额外依赖列表
+            include_default: 是否包含默认依赖
+
+        Returns:
+            tools/requirements.txt 路径
+        """
+        deps: list[str] = []
+        if include_default:
+            deps.extend(self.DEFAULT_TOOL_DEPENDENCIES)
+        if dependencies:
+            deps.extend(dependencies)
+
+        # 去重并移除空字符串
+        unique_deps = list(dict.fromkeys(d for d in deps if d and d.strip()))
+
+        if unique_deps:
+            logger.info(f"初始化 tools 环境依赖: {unique_deps}")
+            return self._tools.add_dependencies(*unique_deps)
+
+        # 仅创建 venv（无依赖）
+        self._tools.ensure_venv(self.config.tools_venv_dir)
+        return self.config.tools_requirements
 
     # === 索引生成 ===
 

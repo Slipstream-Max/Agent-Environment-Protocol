@@ -9,6 +9,7 @@ import pytest
 from pathlib import Path
 
 from aep import EnvManager
+from aep.core.config.envconfig import MCPServerConfig
 from aep.core.config.handlers.mcp import MCPHandler, MCPTransport
 
 # Echo server 路径
@@ -36,26 +37,20 @@ class TestMCPAddStdio:
 
         assert stub.exists()
         assert stub.name == "echo.py"
+        content = stub.read_text(encoding="utf-8")
+        assert "def echo(" in content
+        assert "def add(" in content
 
-        # 检查 manifest 中发现了工具
-        manifest = handler.get_manifest("echo")
-        assert manifest is not None
-        tool_names = [t["name"] for t in manifest["tools"]]
-        assert "echo" in tool_names
-        assert "add" in tool_names
-
-    def test_manifest_is_tool_only(self, handler: MCPHandler):
-        """manifest 仅包含 tools 元数据"""
+    def test_no_manifest_generated(self, handler: MCPHandler):
+        """add 后不生成 manifest 缓存"""
         handler.add(
             "echo",
             command=sys.executable,
             args=[ECHO_SERVER],
         )
 
-        manifest = handler.get_manifest("echo")
-        assert manifest is not None
-        assert "tools" in manifest
-        assert "prompts" not in manifest
+        config_dir = handler.config.mcp_config_path("echo")
+        assert not (config_dir / "manifest.json").exists()
 
     def test_stub_contains_tool_functions(self, handler: MCPHandler):
         """生成的 stub 文件包含发现的工具函数"""
@@ -237,8 +232,8 @@ class TestMCPRefresh:
         manager = EnvManager(tmp_path / "config")
         return manager.mcp
 
-    def test_refresh_updates_manifest(self, handler: MCPHandler):
-        """刷新后 manifest 更新"""
+    def test_refresh_regenerates_stub(self, handler: MCPHandler):
+        """刷新后会重新生成 stub"""
         handler.add(
             "echo",
             command=sys.executable,
@@ -248,11 +243,8 @@ class TestMCPRefresh:
         # 刷新
         stub = handler.refresh("echo")
         assert stub.exists()
-
-        manifest = handler.get_manifest("echo")
-        assert manifest is not None
-        tool_names = [t["name"] for t in manifest["tools"]]
-        assert "echo" in tool_names
+        content = stub.read_text(encoding="utf-8")
+        assert "def echo(" in content
 
     def test_refresh_nonexistent_raises(self, handler: MCPHandler):
         """刷新不存在的服务器抛出异常"""
@@ -282,3 +274,47 @@ class TestMCPValidation:
         """找不到命令时抛出异常"""
         with pytest.raises(RuntimeError, match="未找到命令"):
             handler.add("test", command="nonexistent_cmd_xyz_12345")
+
+
+class TestMCPHTTPConnectCode:
+    """测试 Streamable HTTP 连接代码生成"""
+
+    @pytest.fixture
+    def handler(self, tmp_path: Path) -> MCPHandler:
+        manager = EnvManager(tmp_path / "config")
+        return manager.mcp
+
+    def test_http_connect_code_uses_http_client_for_headers(self, handler: MCPHandler):
+        """HTTP 连接代码应通过 httpx.AsyncClient 注入 headers"""
+        config = MCPServerConfig(
+            name="remote",
+            transport="http",
+            url="http://localhost:8000/mcp",
+            headers={"Authorization": "Bearer token"},
+        )
+
+        connect_code = handler._build_http_connect_code(config)
+
+        assert "import httpx" in connect_code
+        assert "httpx.AsyncClient(headers=_MCP_HEADERS or None)" in connect_code
+        assert "streamable_http_client(_MCP_URL, http_client=http_client)" in connect_code
+        assert "streamable_http_client(_MCP_URL, headers=" not in connect_code
+
+    def test_build_connect_code_dispatches_by_transport(self, handler: MCPHandler):
+        """统一构建入口按 transport 分派"""
+        stdio_config = MCPServerConfig(
+            name="echo",
+            transport="stdio",
+            command=[sys.executable, ECHO_SERVER],
+        )
+        http_config = MCPServerConfig(
+            name="remote",
+            transport="http",
+            url="http://localhost:8000/mcp",
+        )
+
+        stdio_code = handler._build_connect_code(MCPTransport.STDIO, stdio_config)
+        http_code = handler._build_connect_code(MCPTransport.HTTP, http_config)
+
+        assert "stdio_client" in stdio_code
+        assert "streamable_http_client" in http_code

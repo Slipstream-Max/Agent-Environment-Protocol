@@ -136,3 +136,60 @@ class TestEnvManagerConvenienceMethods:
             content = result.read_text()
             assert "aiohttp" in content
             assert "websockets>=10.0" in content
+
+
+class TestEnvManagerToolEnvironment:
+    """测试 tools 环境初始化"""
+
+    def test_init_tool_environment_with_defaults(self, tmp_path: Path):
+        """默认初始化应写入内置依赖"""
+        manager = EnvManager(tmp_path / "config")
+
+        with patch.object(manager.tools, "ensure_venv"), patch.object(
+            manager.tools, "install_dependencies"
+        ):
+            req = manager.init_tool_environment()
+
+        content = req.read_text(encoding="utf-8")
+        assert "numpy" in content
+        assert "pandas" in content
+        assert "matplotlib" in content
+        assert "mcp" in content
+
+    def test_init_tool_environment_with_custom_dependencies(self, tmp_path: Path):
+        """支持追加自定义依赖并去重"""
+        manager = EnvManager(tmp_path / "config")
+
+        with patch.object(manager.tools, "ensure_venv"), patch.object(
+            manager.tools, "install_dependencies"
+        ):
+            req = manager.init_tool_environment(
+                dependencies=["seaborn", "numpy"],
+                include_default=True,
+            )
+
+        lines = {
+            line.strip()
+            for line in req.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        }
+        assert "seaborn" in lines
+        assert "numpy" in lines
+        assert len([x for x in lines if x == "numpy"]) == 1
+
+    def test_auto_init_tool_env_calls_initializer(self, tmp_path: Path):
+        """auto_init_tool_env=True 时初始化会自动触发"""
+        with patch(
+            "aep.core.config.envmanager.EnvManager.init_tool_environment"
+        ) as init_env:
+            EnvManager(
+                tmp_path / "config",
+                auto_init_tool_env=True,
+                include_default_tool_dependencies=False,
+                tool_dependencies=["mcp"],
+            )
+
+        init_env.assert_called_once_with(
+            dependencies=["mcp"],
+            include_default=False,
+        )
