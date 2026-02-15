@@ -1,264 +1,162 @@
-# AEP - Agent Environment Protocol
+﻿# AEP - Agent Environment Protocol
 
 > 为 AI Agent 提供统一的能力发现和调用接口。
 
 ## 核心概念
 
-**AEP 是一个能力注册表协议**，通过目录化的方式管理工具、技能和资料库，让 AI Agent 可以统一发现和调用各种能力。
+AEP 通过目录化配置管理三类能力：
 
-### 核心组件
+- `tools/`：Python 工具与 MCP 生成的工具 stub
+- `skills/`：脚本型能力（带 `SKILL.md`）
+- `library/`：资料文档
 
-| 组件 | 说明 |
-|------|------|
-| **EnvManager** | 能力配置管理器，管理工具、技能、资料库 |
-| **AEP** | 主类，通过 `attach()` 将配置挂载到工作区 |
-| **AEPSession** | 会话，通过 `exec()` 执行命令 |
-
-### 目录结构
-
-```
-config_dir/
-├── tools/                    # 工具目录
-│   ├── .venv/               # 共享虚拟环境 (uv 管理)
-│   ├── requirements.txt     # 依赖清单
-│   ├── index.md             # 工具索引
-│   └── grep.py              # Python 工具 / MCP stub
-├── skills/                   # 技能目录
-│   ├── index.md
-│   └── web-scraper/         # 普通技能
-├── library/                  # 资料库
-│   ├── index.md
-│   └── api-docs.md
-└── _mcp/                     # MCP 配置（外部存储，不挂载到工作区）
-    └── figma/
-        ├── config.json
-        └── manifest.json
-```
+运行时通过 `AEP.attach(...)` 挂载到工作区 `.agents/`，再由 `AEPSession.exec(...)` 统一调用。
 
 ## 快速开始
 
 ### 安装
 
 ```bash
-# 使用 uv 安装
 uv add aep
 ```
 
-### 基本使用
+### 配置 + 挂载 + 运行
 
 ```python
 from aep import EnvManager, AEP
 
-# === 阶段一：配置阶段 ===
+# 1) 配置阶段
 config = EnvManager("./agent_capabilities")
 
-# 添加工具（支持依赖参数）
-config.add_tool(
-    "./tools/grep.py",
-    dependencies=["regex>=2023.0"]
-)
-
-# 添加技能
-config.add_skill(
-    "./skills/web-scraper/",
-    dependencies=["requests", "beautifulsoup4"]
-)
-
-# 添加资料库
+config.add_tool("./tools/grep.py", dependencies=["regex>=2023.0"])
+config.add_skill("./skills/web-scraper")
 config.add_library("./docs/api-docs.md")
 
-# 生成索引
+# 生成 index.md（tools/skills/library）
 config.index()
 
-# === 阶段二：挂载阶段 ===
-aep = AEP.attach(
-    workspace="./my_project",
-    config=config,
-)
+# 2) 挂载阶段
+aep = AEP.attach(workspace="./my_project", config=config)
 
-# === 阶段三：运行时 ===
+# 3) 运行阶段
 session = aep.create_session()
-
-# exec 是唯一对外接口
-result = session.exec("tools list")
-result = session.exec('tools run "tools.grep.search(\'TODO\', \'.\')"')
-result = session.exec("skills run web-scraper/main.py --url 'https://example.com'")
-result = session.exec("ls .agents/library/")  # Shell 透传
+print(session.exec("tools list").stdout)
+print(session.exec("skills list").stdout)
 ```
 
-## 架构设计
+## Skills 规则（当前实现）
 
-### 模块化配置系统
+### 目录技能
 
-```
-aep/core/config/
-├── envconfig.py          # 纯配置数据模型
-├── envmanager.py         # 统一管理器
-└── handlers/             # 独立处理器
-    ├── base.py           # 基类 (venv/依赖管理)
-    ├── tools.py          # 工具处理器
-    ├── skills.py         # 技能处理器
-    ├── library.py        # 资料库处理器
-    └── mcp.py            # MCP 处理器
+技能目录至少包含 `SKILL.md`，并满足 frontmatter 规范：
+
+```yaml
+---
+name: web-scraper
+description: Crawl and parse web pages. Use when user asks to fetch and extract webpage content.
+---
 ```
 
-### 处理器 API
+约束由内置 validator 校验（基于 Agent Skills 规则），包括：
 
-```python
-# 通过 EnvManager 访问各处理器
-manager = EnvManager("./config")
+- `name` 必填、<=64、仅小写字母/数字/连字符
+- `description` 必填、非空、<=1024
+- 目录名必须与 `name` 一致
 
-# 工具处理器
-manager.tools.add("tool.py", dependencies=["numpy>=1.20"])
-manager.tools.add_dependencies("pandas", "scipy")
-manager.tools.list()
-manager.tools.remove("tool")
+### 单文件技能（.md）
 
-# 技能处理器
-manager.skills.add("./skill/", dependencies=["requests"])
-manager.skills.list()
-manager.skills.remove("skill")
+`add_skill()` 支持单文件输入，但仅支持 `.md`：
 
-# 资料库处理器
-manager.library.add("doc.md")
-manager.library.list()
-manager.library.remove("doc.md")
+- 从 frontmatter 读取 `name`
+- 自动创建 `skills/<name>/SKILL.md`
+- 若 `name` 参数与 frontmatter 不一致，直接报错
 
-# MCP 处理器
-from aep.core.config import MCPTransport
+### 在 skills 里放脚本
 
-# STDIO 模式：自动连接并发现 tools
-manager.mcp.add(
-    name="figma",
-    command="npx",
-    args=["figma-mcp-server"],
-    env={"FIGMA_API_KEY": "xxx"}
-)
+推荐结构：
 
-# HTTP 模式
-manager.mcp.add(
-    name="remote_tools",
-    transport=MCPTransport.HTTP,
-    url="http://localhost:8000/mcp",
-)
+```text
+my-skill/
+├── SKILL.md
+└── scripts/
+    └── run.py
 ```
 
-### 依赖管理
+执行方式：
 
-工具和技能支持版本约束的依赖声明：
-
-```python
-# 添加工具时声明依赖
-manager.add_tool(
-    "./my_tool.py",
-    dependencies=[
-        "torch==2.0.0",
-        "numpy>=1.20",
-        "requests<=2.28,>=2.25"
-    ]
-)
-
-# 依赖会保存到 requirements.txt 并自动安装
+```bash
+skills run my-skill/scripts/run.py [args]
 ```
 
-执行流程：
-1. 复制工具文件
-2. 保存依赖到 `requirements.txt`
-3. 确保虚拟环境存在
-4. 通过 `uv pip install` 安装依赖
+`skills index.md` 当前输出字段：`name / description / path`，并附统一提示：`skills run xx.py`。
 
 ## 命令参考
 
-### tools 命令
+### tools
 
 ```bash
-tools list                    # 列出所有工具
-tools info <name>             # 查看工具详情
-tools run "<python_code>"     # 执行 Python 代码
-
-# 示例
-tools run "tools.grep.search('TODO', './src')"
-tools run "tools.file.read('README.md')"
+tools list
+tools info <name>
+tools run "<python_code>"
 ```
 
-### skills 命令
+### skills
 
 ```bash
-skills list                   # 列出所有技能
-skills info <name>            # 查看技能详情
-skills run <path.py> [args]   # 执行技能脚本
-
-# 示例
-skills run web-scraper/main.py --url "https://example.com"
+skills list
+skills info <name>
+skills run <path.py> [args]
 ```
 
-### Shell 透传
-
-所有非 `tools`/`skills` 开头的命令都会透传给系统 Shell：
+### 内置命令
 
 ```bash
-ls .agents/library/
-cat .agents/library/api-docs.md
-grep "pattern" .agents/library/*.md
-git status
+cd [path]
+export KEY=VALUE
 ```
+
+其他命令将透传到系统 shell。
 
 ## MCP 集成
 
-AEP 使用官方 `mcp` SDK 支持 MCP (Model Context Protocol) 服务器，实现能力的连接与**自动发现**：
+AEP 使用官方 `mcp` SDK：
 
-1. **自动工具发现**：连接后自动查询服务器工具，生成类型化的 Python stub。
-2. **Tool-Only 设计**：仅保留工具能力，不处理 prompts/resources 的映射与落地。
-3. **能力隔离**：MCP 配置存储在顶层 `_mcp/` 目录，不暴露给 Agent，仅暴露 tool stub。
+- `config.add_mcp_server(...)` 连接并发现工具
+- 自动在 `tools/` 生成 python stub
+- 运行期统一通过 `tools run "tools.<mcp_name>.<method>(...)"` 调用
+
+示例：
 
 ```python
-from aep import EnvManager, MCPTransport
+from aep import EnvManager
+from aep.core.config.handlers.mcp import MCPTransport
 
 config = EnvManager("./config")
-
-# 添加时自动连接并发现所有能力
-config.mcp.add(
-    name="filesystem",
+config.add_mcp_server(
+    "filesystem",
+    transport=MCPTransport.STDIO,
     command="npx",
     args=["@anthropic/mcp-server-filesystem", "/workspace"],
 )
+config.index()
 ```
 
-调用方式与普通工具完全一致：
+## 示例脚本
 
-```python
-# 调用发现的工具
-session.exec('tools run "tools.filesystem.read_file(path=\'/etc/hosts\')"')
+- 完整端到端示例：`examples/demo.py`
+- skills/scripts 示例：`examples/demo_skill_scripts.py`
+
+运行：
+
+```bash
+uv run python examples/demo.py
+uv run python examples/demo_skill_scripts.py
 ```
 
 ## 开发
 
-### 运行测试
-
 ```bash
-uv run pytest tests/ -v
-```
-
-### 项目结构
-
-```
-aep/
-├── src/aep/
-│   ├── __init__.py
-│   └── core/
-│       ├── aep.py           # AEP 主类
-│       ├── session.py       # 会话管理
-│       ├── executor.py      # 执行器
-│       └── config/          # 配置模块
-│           ├── envconfig.py
-│           ├── envmanager.py
-│           └── handlers/
-├── tests/
-│   ├── test_aep.py
-│   ├── test_config.py
-│   └── test_session.py
-├── arch.md                  # 架构设计
-└── devplan.md               # 开发计划
+uv run pytest tests -q
 ```
 
 ## License

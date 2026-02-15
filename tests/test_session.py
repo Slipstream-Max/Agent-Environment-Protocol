@@ -41,7 +41,17 @@ import sys
 name = sys.argv[1] if len(sys.argv) > 1 else "World"
 print(f"Hello, {name}!")
 """)
-    (skill_dir / "SKILL.md").write_text("# Greeter Skill\n\nSays hello.")
+    (skill_dir / "SKILL.md").write_text(
+        """---
+name: greeter
+description: Says hello to a provided name.
+---
+
+# Greeter Skill
+
+Says hello.
+"""
+    )
     config.add_skill(skill_dir)
 
     config.index()

@@ -32,7 +32,12 @@ def main():
 if __name__ == "__main__":
     main()
 ''')
-    (greeter_dir / "SKILL.md").write_text("""# Greeter Skill
+    (greeter_dir / "SKILL.md").write_text("""---
+name: greeter
+description: Greets a user by name from CLI args.
+---
+
+# Greeter Skill
 
 一个简单的问候技能。
 
@@ -80,7 +85,12 @@ def main():
 if __name__ == "__main__":
     main()
 ''')
-    (calc_dir / "SKILL.md").write_text("""# Calculator Skill
+    (calc_dir / "SKILL.md").write_text("""---
+name: calculator
+description: Runs basic arithmetic operations from command line inputs.
+---
+
+# Calculator Skill
 
 A command-line calculator.
 
@@ -119,7 +129,12 @@ if __name__ == "__main__":
 def format_message(msg: str) -> str:
     return f"[ECHO] {msg}"
 ''')
-    (echo_dir / "SKILL.md").write_text("""# Echo Skill
+    (echo_dir / "SKILL.md").write_text("""---
+name: echo
+description: Echoes messages with a consistent prefix format.
+---
+
+# Echo Skill
 
 Echoes messages with formatting.
 """)
@@ -294,12 +309,20 @@ class TestSkillsRunErrors:
         config = EnvManager(tmp_path / "config")
 
         # 创建一个会报错的技能
-        error_dir = tmp_path / "error_skill"
+        error_dir = tmp_path / "error-skill"
         error_dir.mkdir()
         (error_dir / "main.py").write_text("""
 raise ValueError("Intentional error")
 """)
-        (error_dir / "SKILL.md").write_text("# Error Skill")
+        (error_dir / "SKILL.md").write_text(
+            """---
+name: error-skill
+description: Raises an intentional error for testing.
+---
+
+# Error Skill
+"""
+        )
         config.add_skill(error_dir)
         config.index()
 
@@ -309,7 +332,7 @@ raise ValueError("Intentional error")
         aep = AEP.attach(workspace=workspace, config=config)
         session = aep.create_session()
 
-        result = session.exec("skills run error_skill/main.py")
+        result = session.exec("skills run error-skill/main.py")
 
         assert result.return_code == 1
         assert "ValueError" in result.stderr or "Intentional error" in result.stderr

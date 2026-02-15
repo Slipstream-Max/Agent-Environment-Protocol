@@ -59,6 +59,13 @@ class TestEnvManagerIndex:
         skill = tmp_path / "scraper"
         skill.mkdir()
         (skill / "main.py").write_text('print("scrape")')
+        (skill / "SKILL.md").write_text(
+            """---
+name: scraper
+description: Scrape content from test pages.
+---
+"""
+        )
         manager.skills.add(skill)
 
         # 添加资料
@@ -85,6 +92,9 @@ class TestEnvManagerIndex:
         assert index.exists()
         content = index.read_text()
         assert "scraper" in content
+        assert "Scrape content from test pages." in content
+        assert "scraper/" in content
+        assert "skills run xx.py" in content
 
     def test_index_creates_library_index(self, manager_with_content: EnvManager):
         """生成资料索引"""
@@ -113,8 +123,16 @@ class TestEnvManagerConvenienceMethods:
 
     def test_add_skill_convenience(self, manager: EnvManager, tmp_path: Path):
         """add_skill 便捷方法"""
-        skill = tmp_path / "analyzer.py"
-        skill.write_text("print('analyze')")
+        skill = tmp_path / "analyzer.md"
+        skill.write_text(
+            """---
+name: analyzer
+description: Analyze data from markdown-only skill.
+---
+
+# Analyzer
+"""
+        )
 
         result = manager.add_skill(skill)
         assert result.is_dir()
