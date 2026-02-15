@@ -22,7 +22,7 @@ LLM (Agent) --exec(command)--> AEP Session --路由--> Tools/Skills/Shell
 |---------|---------|-----|
 | `tools ...` | AEP 内置命令 | `tools run "tools.grep.search('TODO', '.')"` |
 | `skills ...` | AEP 内置命令 | `skills run web-scraper/main.py --url ...` |
-| 其他 | Shell 透传 | `ls -la`, `cat .agent/library/api.md`, `git status` |
+| 其他 | Shell 透传 | `ls -la`, `cat .agents/library/api.md`, `git status` |
 
 ---
 
@@ -50,7 +50,7 @@ LLM (Agent) --exec(command)--> AEP Session --路由--> Tools/Skills/Shell
 ┌─────────────────────────────────────────────────────────────────┐
 │                     Workspace (工作区)                           │
 │  ./my_project/                                                   │
-│  ├── .agent/              ← 真实目录                             │
+│  ├── .agents/              ← 真实目录                             │
 │  │   ├── tools/           ← symlink -> config/tools/            │
 │  │   ├── skills/          ← symlink -> config/skills/           │
 │  │   └── library/         ← symlink -> config/library/          │
@@ -61,14 +61,14 @@ LLM (Agent) --exec(command)--> AEP Session --路由--> Tools/Skills/Shell
 
 ### 符号链接的优势
 
-Agent 可以像访问普通目录一样操作 `.agent/`：
+Agent 可以像访问普通目录一样操作 `.agents/`：
 ```bash
 # 这些标准 shell 命令都能正常工作
-ls .agent/
-cd .agent/library
-cat .agent/library/api-docs.md
-cat .agent/tools/index.md
-grep "TODO" .agent/library/*.md
+ls .agents/
+cd .agents/library
+cat .agents/library/api-docs.md
+cat .agents/tools/index.md
+grep "TODO" .agents/library/*.md
 ```
 
 ### 两阶段 API
@@ -110,11 +110,11 @@ aep = AEP.attach(
 )
 
 # attach() 内部逻辑：
-# 1. 创建 .agent/ 目录
+# 1. 创建 .agents/ 目录
 # 2. 创建符号链接:
-#    .agent/tools/   -> config/tools/
-#    .agent/skills/  -> config/skills/
-#    .agent/library/ -> config/library/
+#    .agents/tools/   -> config/tools/
+#    .agents/skills/  -> config/skills/
+#    .agents/library/ -> config/library/
 
 session = aep.create_session()
 ```
@@ -183,7 +183,7 @@ config_dir/
 
 | 任务 | 产出 | 状态 |
 |------|------|------|
-| AEP.attach() | 创建 .agent/ + 符号链接 | ✅ Done |
+| AEP.attach() | 创建 .agents/ + 符号链接 | ✅ Done |
 | Session 类 | `aep/core/session.py` | ✅ Done |
 | 状态管理 | `cwd`, `env` 持久化 | ✅ Done |
 | exec() | 命令执行入口 | ✅ Done |
@@ -197,8 +197,8 @@ class AEP:
         instance.workspace = Path(workspace)
         instance.config = config
         
-        # 创建 .agent/ 目录
-        agent_dir = instance.workspace / ".agent"
+        # 创建 .agents/ 目录
+        agent_dir = instance.workspace / ".agents"
         agent_dir.mkdir(exist_ok=True)
         
         # 创建符号链接 (如果不存在)
@@ -335,13 +335,13 @@ skills install web-scraper beautifulsoup4
 **无专门命令**，Agent 直接使用 shell：
 ```bash
 # 列出资料
-ls .agent/library/
+ls .agents/library/
 
 # 查看内容
-cat .agent/library/api-docs.md
+cat .agents/library/api-docs.md
 
 # 搜索
-grep "authentication" .agent/library/*.md
+grep "authentication" .agents/library/*.md
 ```
 
 ---
@@ -354,7 +354,7 @@ grep "authentication" .agent/library/*.md
 1. **Tools** → 自动生成 Python stub 到 `tools/` 目录。
 2. **Prompts** → 自动生成 `SKILL.md` 文档到 `skills/{name}/` 目录。
 
-**能力隔离**: MCP 的配置原始文件存放在顶层 `_mcp/` 目录，该目录**不会**被挂载到 `.agent/` 工作区，Agent 仅能看到生成出的工具和文档。
+**能力隔离**: MCP 的配置原始文件存放在顶层 `_mcp/` 目录，该目录**不会**被挂载到 `.agents/` 工作区，Agent 仅能看到生成出的工具和文档。
 
 | 任务 | 产出 | 状态 |
 |------|------|------|
@@ -430,7 +430,7 @@ aep = AEP.attach(
     workspace="./my_project",
     config=config,
 )
-# 结果: ./my_project/.agent/ 下有符号链接指向 config
+# 结果: ./my_project/.agents/ 下有符号链接指向 config
 
 
 # === 阶段三：运行时 (暴露给 LLM) ===
@@ -440,8 +440,8 @@ session = aep.create_session()
 context = session.get_context()
 
 # exec 是唯一接口
-result = session.exec("ls .agent/")                    # 浏览能力目录
-result = session.exec("cat .agent/library/api.md")     # 查看资料
+result = session.exec("ls .agents/")                    # 浏览能力目录
+result = session.exec("cat .agents/library/api.md")     # 查看资料
 result = session.exec("tools list")                    # 列出工具
 result = session.exec("tools run \"tools.grep.search('TODO', '.')\"")
 result = session.exec("skills run web-scraper/main.py --url '...'")
@@ -475,7 +475,7 @@ agent_capabilities/
 
 # 工作区 (每个项目)
 my_project/
-├── .agent/
+├── .agents/
 │   ├── tools/     -> symlink to agent_capabilities/tools/
 │   ├── skills/    -> symlink to agent_capabilities/skills/
 │   └── library/   -> symlink to agent_capabilities/library/

@@ -30,7 +30,7 @@ class AEP:
     """
 
     def __init__(
-        self, workspace: Optional[str | Path] = None, agent_dir: str = ".agent"
+        self, workspace: Optional[str | Path] = None, agent_dir: str = ".agents"
     ):
         self.workspace: Optional[Path] = (
             Path(workspace).resolve() if workspace else None
@@ -46,17 +46,17 @@ class AEP:
         cls,
         workspace: str | Path,
         config: EnvManager | str | Path,
-        agent_dir: str = ".agent",
+        agent_dir: str = ".agents",
     ) -> "AEP":
         """
         将配置挂载到工作区
 
-        在工作区创建协议目录（默认 .agent/），内部使用符号链接指向配置目录。
+        在工作区创建协议目录（默认 .agents/），内部使用符号链接指向配置目录。
 
         Args:
             workspace: 工作区目录路径
             config: EnvManager 实例或配置目录路径
-            agent_dir: 协议目录名称，默认为 ".agent"
+            agent_dir: 协议目录名称，默认为 ".agents"
 
         Returns:
             AEP 实例

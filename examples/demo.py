@@ -182,7 +182,7 @@ def main() -> None:
         print("=" * 64)
         run_and_print(session, "tools list")
         run_and_print(session, "skills list")
-        run_and_print(session, "cat .agent/library/quickstart.md")
+        run_and_print(session, "cat .agents/library/quickstart.md")
 
         # 单个 tools run 代码块里同时调用本地工具和 MCP 工具
         code = """

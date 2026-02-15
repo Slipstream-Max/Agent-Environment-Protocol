@@ -226,11 +226,11 @@ class TestSessionCdCommand:
         assert session.cwd == subdir
 
     def test_cd_to_agent_dir(self, session: AEPSession):
-        """cd 到 .agent 目录"""
-        result = session.exec("cd .agent")
+        """cd 到 .agents 目录"""
+        result = session.exec("cd .agents")
 
         assert result.return_code == 0
-        assert ".agent" in str(session.cwd)
+        assert ".agents" in str(session.cwd)
 
     def test_cd_nonexistent(self, session: AEPSession):
         """cd 到不存在的目录"""
@@ -288,8 +288,8 @@ class TestSessionShellPassthrough:
         assert "hello world" in result.stdout
 
     def test_dir_agent(self, session: AEPSession):
-        """dir .agent"""
-        result = session.exec("dir .agent")
+        """dir .agents"""
+        result = session.exec("dir .agents")
 
         assert result.return_code == 0
         assert "tools" in result.stdout or "tools" in result.stdout.lower()

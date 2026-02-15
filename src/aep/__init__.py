@@ -25,7 +25,7 @@ Example:
     >>> session = aep.create_session()
     >>> result = session.exec("tools list")
     >>> result = session.exec("tools run \"tools.grep.search('TODO', '.')\"")
-    >>> result = session.exec("ls .agent/library/")
+    >>> result = session.exec("ls .agents/library/")
 """
 
 from aep.core import AEP, EnvManager, AEPSession, ExecResult

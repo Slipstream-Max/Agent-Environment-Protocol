@@ -83,7 +83,7 @@ session = aep.create_session()
 result = session.exec("tools list")
 result = session.exec('tools run "tools.grep.search(\'TODO\', \'.\')"')
 result = session.exec("skills run web-scraper/main.py --url 'https://example.com'")
-result = session.exec("ls .agent/library/")  # Shell 透传
+result = session.exec("ls .agents/library/")  # Shell 透传
 ```
 
 ## 架构设计
@@ -197,9 +197,9 @@ skills run web-scraper/main.py --url "https://example.com"
 所有非 `tools`/`skills` 开头的命令都会透传给系统 Shell：
 
 ```bash
-ls .agent/library/
-cat .agent/library/api-docs.md
-grep "pattern" .agent/library/*.md
+ls .agents/library/
+cat .agents/library/api-docs.md
+grep "pattern" .agents/library/*.md
 git status
 ```
 

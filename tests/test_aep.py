@@ -32,17 +32,17 @@ class TestAEPAttach:
         return ws
 
     def test_attach_creates_agent_dir(self, workspace: Path, config: EnvManager):
-        """attach 创建 .agent 目录"""
+        """attach 创建 .agents 目录"""
         aep = AEP.attach(workspace=workspace, config=config)
 
-        agent_dir = workspace / ".agent"
+        agent_dir = workspace / ".agents"
         assert agent_dir.exists()
 
     def test_attach_creates_symlinks(self, workspace: Path, config: EnvManager):
         """attach 创建符号链接"""
         aep = AEP.attach(workspace=workspace, config=config)
 
-        agent_dir = workspace / ".agent"
+        agent_dir = workspace / ".agents"
 
         # 检查链接存在
         assert (agent_dir / "tools").exists()
@@ -53,7 +53,7 @@ class TestAEPAttach:
         """符号链接指向配置目录"""
         aep = AEP.attach(workspace=workspace, config=config)
 
-        tools_link = workspace / ".agent" / "tools"
+        tools_link = workspace / ".agents" / "tools"
         # 链接指向的目录应该包含工具文件
         assert (tools_link / "calc.py").exists()
 
@@ -131,7 +131,7 @@ class TestAEPDetach:
 
         attached_aep.detach()
 
-        agent_dir = workspace / ".agent"
+        agent_dir = workspace / ".agents"
         # 符号链接应该被移除
         assert not (agent_dir / "tools").exists()
         assert not (agent_dir / "skills").exists()
